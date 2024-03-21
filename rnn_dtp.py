@@ -292,4 +292,34 @@ def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, bat
     # ...
     # h_[:,0,:][len(h_)-1] - first hidden layer (e.g. H1)
 
+    def scan_fn(x_tp1, h_t, h_tp1, h_hat_tp1, Wxh, Vhh, ch):
+        return h_t - G(x_tp1, h_tp1) + G(x_tp1, h_hat_tp1)
+    
+    # Compute h_ using torch.scan equivalent
+    h_ = [first_target]
+
+    for index in range(len(x)):
+        h_.append(scan_fn(x[index], h[index+1], h[index], h_hat_tp1, Wxh, Vhh, ch))
+
+    # Merge first_target and h_ and get an unified tensor with all targets
+    first_target = torch.reshape(first_target, [1, first_target.shape[0], first_target.shape[1]])
+    h_ = torch.cat([first_target, h_])
+
+    # Reverse the order f h_ to get [H_0, H_1, H_2 ....]
+    h_ = h_[::-1]
+
+    # gradients of feedback (inverse) mapping
+    
+    # splice h0 and h in h_offset, and remove H for the last layer (we don't need it)
+
+    h_offset = torch.cat([torch.reshape(h0, [1, h0.shape[0], h0.shape[1]]), h])[:-1, :, :]
+
+    # Add gaussian noise
+    h_offset_c = h_offset + gaussian(h_offset.shape, noise)
+
+    # Loop over h_offset & x so that torch.autograd.grad(mse(G(x[t], F(x[t], h[t-1])), h[t-1]), [Vhh, Ch], consider_constant=[x[t], F(x[t], h[t-1]), h[t-1]])
+
+    def loss_grad(x_t, h_tm1, Wxh, Vhh, ch):
+        torch.autograd.grad(mse(G(x_t, F(x_t, h_tm1)), h_tm1), [Vhh, ch], con)
+    (dVhh, dCh) = []
     
