@@ -311,7 +311,7 @@ def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, bat
     # h_ = torch.cat([first_target, h_])
 
     # Reverse the order f h_ to get [H_0, H_1, H_2 ....]
-    h_ = h_[::-1]
+    h_ = torch.flip(h_, dims=[0]) # h_[::-1]
 
     # gradients of feedback (inverse) mapping
     
@@ -324,7 +324,77 @@ def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, bat
 
     # Loop over h_offset & x so that torch.autograd.grad(mse(G(x[t], F(x[t], h[t-1])), h[t-1]), [Vhh, Ch], consider_constant=[x[t], F(x[t], h[t-1]), h[t-1]])
 
-    def loss_grad(x_t, h_tm1, Wxh, Vhh, ch):
-        torch.autograd.grad(mse(G(x_t, F(x_t, h_tm1)), h_tm1), [Vhh, ch], con)
-    (dVhh, dCh) = []
+    loss_grad = lambda x_t, h_tm1: torch.autograd.grad(mse(G(x_t, F(x_t, h_tm1)), h_tm1), [Vhh, ch], con)
     
+    # initialize the gradients
+    dVhh_sum = torch.zeros_like(Vhh)
+    dCh_sum = torch.zeros_like(ch)
+
+    for x_t, h_tm1 in zip(x, h_offset_c):
+        # calculate G(x_t, F(x_t, h_tm1))
+        output = G(x_t, F(x_t, h_tm1))
+
+        # calculate gradients
+        mse_loss = mse(output, h_tm1)
+
+        # Detach constants from computational graph
+        output = output.detach()
+        h_tm1 = h_tm1.detach()
+
+        dVhh, dCh = torch.autograd.grad(mse_loss, [Vhh, ch])
+
+        dVhh_sum += dVhh
+        dCh_sum += dCh
+
+        # Reset gradients for the next iteration
+        Vhh.grad.zero_()
+        ch.grad.zero_()
+    
+    # Remove accumulated gradients
+    dVhh = dVhh_sum
+    dCh = dCh_sum
+    del dVhh_sum
+    del dCh_sum
+
+    # Compute the norm of the updates of G(.)
+    g_norm_theta = torch.sqrt(torch.sum(dVhh**2) + torch.sum(dCh**2))
+
+    # Graduents of the feedforward
+    if (wxh_updates == "bptt"):
+        # using TPTT for the Whh and bh updates
+        def compute_grad(x_t, h_t, h_tm1, h_hat_t, Wxh, Whh, bh):
+            x_t_detached = x_t.detach() # Detach x_t
+            h_tm1_detached = h_tm1.detach() # Detach h_tm1
+            h_hat_t_detached = h_hat_t.detach() # Detach h_hat_t
+            return torch.autograd.grad(mse(F(x_t, h_tm1), h_hat_t), [Whh, bh], retain_graph=True)
+        
+        grad_output = [compute_grad(x_t, h_t, h_tm1, h_hat_t, Wxh, Whh, bh) for x_t, h_t, h_tm1, h_hat_t in zip(x, h, h_offset, h_)]
+
+        dWhh, dbh = zip(*grad_output)
+        dWhh = torch.stack(dWhh).sum(dim=0)
+        dbh = torch.stack(dbh).sum(dim=0)
+
+        # Using BPTT for the Wxh, Why, and by updates
+        dWxh, dWhy, dby = torch.autograd.grad(cost, [Wxh, Why, by])
+
+    else:
+        # Using TPTT for the Whh, bh, and Wxh updates
+        def compute_grad(x_t, h_t, h_tm1, h_hat_t, Wxh, Whh, bh):
+            x_t_detached = x_t.detach()  # Detach x_t
+            h_tm1_detached = h_tm1.detach()  # Detach h_tm1
+            h_hat_t_detached = h_hat_t.detach()  # Detach h_hat_t
+            return torch.autograd.grad(mse(F(x_t_detached, h_tm1_detached), h_hat_t_detached), [Whh, bh, Wxh], retain_graph=True)
+
+        grad_output = [compute_grad(x_t, h_t, h_tm1, h_hat_t, Wxh, Whh, bh) for x_t, h_t, h_tm1, h_hat_t in zip(x, h, h_offset, h_)]
+
+        dWhh, dbh, dWxh = zip(*grad_output)
+        dWhh = torch.stack(dWhh).sum(dim=0)
+        dbh = torch.stack(dbh).sum(dim=0)
+        dWxh = torch.stack(dWxh).sum(dim=0)
+
+        # Compute dWhy and dby using BPTT
+        dWhy, dby = torch.autograd.grad(cost, [Why, by])
+
+    # Add up the dWhh and dbh corrections
+    dWhh = dWhh.sum(dim=0)
+    dbh = dbh.sum(dim=0)
