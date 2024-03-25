@@ -260,13 +260,13 @@ def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, bat
     # Define the forward function F(.)
     F = lambda x, hs: activ(torch.mm(hs, Whh) + torch.mm(x, Wxh) + bh)
 
-    # Compute the forward outputs
+    # Compute the hidden activations (h_t) in forward pass
     h = [h0]
     def forward_function(x_t, h_prev, Whh, Wxh, Why, bh):
         return F(x_t, h_prev)
     
     for x_t in x:
-        h.append(F(x_t, h[-1], Whh, Wxh, Why, bh))
+        h.append(F(x_t, h[-1]))
     
     # Compute the final output based on the problem type (classificaation or real-valued) and get the global loss
     if task.classifType == 'lastSoftmax':
@@ -291,19 +291,24 @@ def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, bat
     # h_[:,0,:][0] - second deepest layer (e.g H9)]
     # ...
     # h_[:,0,:][len(h_)-1] - first hidden layer (e.g. H1)
-
-    def scan_fn(x_tp1, h_t, h_tp1, h_hat_tp1, Wxh, Vhh, ch):
-        return h_t - G(x_tp1, h_tp1) + G(x_tp1, h_hat_tp1)
     
     # Compute h_ using torch.scan equivalent
-    h_ = [first_target]
+    h_ = []
+    h_hat_t = None
 
-    for index in range(len(x)):
-        h_.append(scan_fn(x[index], h[index+1], h[index], h_hat_tp1, Wxh, Vhh, ch))
+    # implement equation 6 from the paper
+    # we begin from the last time step of the horizontal hidden layer and obtain corresponding h_hat_t at every time step until t=1
+    for index in reversed(range(len(x))):
+        if index == len(x)-1:
+            h_hat_t = first_target
+        else:
+            h_hat_t = h[index] - G(x[index+1], h[index+1]) + G(x[index+1], h_hat_t)
+        print(f"index {index}: shape of h_hat_t -> {h_hat_t.shape}")
+        h_.append(h_hat_t)
 
     # Merge first_target and h_ and get an unified tensor with all targets
-    first_target = torch.reshape(first_target, [1, first_target.shape[0], first_target.shape[1]])
-    h_ = torch.cat([first_target, h_])
+    # first_target = torch.reshape(first_target, [1, first_target.shape[0], first_target.shape[1]])
+    # h_ = torch.cat([first_target, h_])
 
     # Reverse the order f h_ to get [H_0, H_1, H_2 ....]
     h_ = h_[::-1]
