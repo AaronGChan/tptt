@@ -324,8 +324,6 @@ def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, bat
 
     # Loop over h_offset & x so that torch.autograd.grad(mse(G(x[t], F(x[t], h[t-1])), h[t-1]), [Vhh, Ch], consider_constant=[x[t], F(x[t], h[t-1]), h[t-1]])
 
-    loss_grad = lambda x_t, h_tm1: torch.autograd.grad(mse(G(x_t, F(x_t, h_tm1)), h_tm1), [Vhh, ch], con)
-    
     # initialize the gradients
     dVhh_sum = torch.zeros_like(Vhh)
     dCh_sum = torch.zeros_like(ch)
@@ -398,3 +396,228 @@ def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, bat
     # Add up the dWhh and dbh corrections
     dWhh = dWhh.sum(dim=0)
     dbh = dbh.sum(dim=0)
+
+    # Set the optimisation technique
+    if gd_opt == "vanilla":
+        # Vanilla SGD
+        updates_g = vanilla_sgd([Vhh, ch], [dVhh, dCh], g_lr)
+        updates_f = vanilla_sgd([Wxh, Whh, bh, Why, by], [dWxh, dWhh, dbh, dWhy, dby], f_lr)
+    
+    elif gd_opt == "nesterov":
+        # Nesterov accelerated gradient
+        updates_g = nesterov_momentum([Vhh, ch], [dVhh, dCh], g_lr)
+        updates_f = nesterov_momentum([Wxh, Whh, bh, Why, by], [dWxh, dWhh, dbh, dWhy, dby], f_lr)
+
+    # Compute the norm of each feedforward update matrix
+    dWhh_norm = torch.sqrt(torch.sum(dWhh**2))
+    dWxh_norm = torch.sqrt(torch.sum(dWxh**2))
+    dWhy_norm = torch.sqrt(torch.sum(dWhy**2))
+    dby_norm = torch.sqrt(torch.sum(dby**2))
+    dbh_norm = torch.sqrt(torch.sum(dbh**2))
+
+    # Define a forward step function
+    def f_step(x_t, i_lr, f_lr):
+        return cost, dWhh_norm, dWxh_norm, dWhy_norm, dby_norm, dbh_norm
+    
+    # Define a feedback step function 
+    def g_step(x, g_lr, noise):
+        return g_norm_theta
+    
+    #########################################
+    # VALIDATION PHASE                      #
+    #########################################
+
+    # Define symbolic variables for the validation phase
+    h0_val = torch.zeros(val_batch, n_hid)
+
+    x_val = torch.Tensor()
+    t_val = torch.Tensor()
+
+    # Define forward pass function
+    def forward_pass(x_t, h_prev, Whh, Wxh, Why):
+        return activ(torch.matmul(h_prev, Whh) + torch.matmul(x_t, Wxh) + bh)
+
+    # Set a forward pass
+    h_val = [h0_val]
+    h_prev = h0_val
+    for x_t in x_val:
+        h_prev = forward_pass(x_t, h_prev, Whh, Wxh, Why, bh)
+        h_val.append(h_prev)
+
+    h_val = torch.stack(h_val)
+
+    # Define a step function for the validation pass
+    def eval_step(x_val, t_val): # h_val, Why, by, task
+        # Compute the final output based on the problem type (classification or real-value), get the global loss, and measure the prediction error
+        if task.classifType == "lastSoftmax":
+            # classification problem - set the last layer to softmax and use cross-entropy loss
+            y_val = nn.softmax(torch.matmul(h_val[-1], Why) + by, dim=1)
+            cost_val = -(t_val * torch.log(y_val)).mean(axis=0).sum()
+            error_val = (torch.argmax(y_val, dim=1) != torch.argmax(t_val, dim=1)).float().mean()
+        elif task.classifType == "lastLinear":
+            # Real-values output - final step is linear, and the loss is MSE
+            y_val = torch.matmul(h_val[-1], Why) + by
+            cost_val = ((t_val - y_val)**2).mean(axis=0).sum()
+            # An example in the mini-batch is considered successfully predicted if 
+            # the error between the prediction and the target is below 0.04
+            error_val = (((t_val - y_val)**2).sum(axis=1) > 0.04).float().mean()
+
+        return cost_val, error_val
+    
+    print("******************************************************")
+    print("Training starts...")
+    print("******************************************************")
+    
+    # Control variable for the tarining loop
+    training = True
+    
+    # Iteration number
+    n = 1
+    
+    # Cost accumulator variable
+    avg_cost = 0
+    
+    # Gradient norm accumulator variables
+    avg_dWhh_norm = 0
+    avg_dWxh_norm = 0
+    avg_dWhy_norm = 0
+    avg_dbh_norm = 0
+    avg_dhy_norm = 0
+    avg_g_norm = 0
+    
+    patience = 300
+    
+    # Measure the initial accuracy
+    valid_x, valid_y = task.generate(val_batch, 
+                                     sample_length(min_length, 
+                                                   max_length, rng))
+    best_score = eval_step(valid_x, valid_y) [1] * 100
+
+    # Repeat until convergence or upon reaching the maxiter limit
+    while (training) and (n <= maxiter):
+
+        # Get a mini-batch of training data
+        train_x, train_y = task.generate(batch_size,
+                                         sample_length(min_length,
+                                                       max_length, rng))
+
+        # Perform a feedback step (set targets)
+        g_norm = g_step(train_x, g_learning_rate, gaussian_noise)
+        
+        # Perform a forward step
+        tr_cost, f_Whh, f_Wxh, f_Why, f_by, f_bh = f_step(train_x, train_y, i_learning_rate, f_learning_rate)
+
+        # Update the accumulation variables
+        avg_cost += tr_cost
+
+        avg_dWhh_norm += f_Whh
+        avg_dWxh_norm += f_Wxh
+        avg_dWhy_norm += f_Why
+        avg_dbh_norm += f_bh
+        avg_dhy_norm += f_by
+        avg_g_norm += g_norm
+
+        if (n % chk_interval == 0):
+            patience -= 1
+            # Time to check the performance on the validation set
+
+            # If the cost is NaN, abort the training
+            avg_cost = avg_cost / float(chk_interval)
+
+            if not torch.isfinite(tr_cost):
+                print("******************************************************")
+                print("Cost is NAN. Training aborted. Best error : %07.3f%%" % best_score)
+                print("******************************************************")
+                print("------------------------------------------------------")
+                return (n-1),best_score
+            
+            # Get the average of the accumulation variables
+
+            avg_g_norm = avg_g_norm / float(chk_interval)                    
+
+            avg_dWhh_norm = avg_dWhh_norm/ float(chk_interval)                    
+            avg_dWxh_norm = avg_dWxh_norm/ float(chk_interval)                    
+            avg_dWhy_norm = avg_dWhy_norm/ float(chk_interval)                    
+            avg_dbh_norm = avg_dbh_norm/ float(chk_interval)                    
+            avg_dhy_norm = avg_dhy_norm/ float(chk_interval)                    
+
+            # Accumulation variables for the validation cost and error
+            valid_cost = 0
+            error = 0
+
+            # Get the number of mini-batches needed to cover the desired
+            # validation sample and loop over them            
+            for dx in range(val_size // val_batch):
+                    
+                # Get a mini-batch for validation
+                valid_x, valid_y = task.generate(val_batch, 
+                                                 sample_length(min_length, 
+                                                               max_length, rng))
+
+                # Take a validation step and get the cost and error from
+                # this mini-batch
+                _cost, _error = eval_step(valid_x, valid_y)                
+                error = error + _error
+                valid_cost = valid_cost + _cost
+ 
+            # Compute the average error and cost
+            error = error*100. / float(val_size // val_batch)
+            valid_cost = valid_cost / float(val_size // val_batch)
+
+            # Get the spectral radius of the Whh and Vhh matrices            
+            rho_Whh =np.max(abs(np.linalg.eigvals(Whh.get_value())))
+            rho_Vhh =np.max(abs(np.linalg.eigvals(Vhh.get_value())))
+
+            if (rho_Whh>20 or rho_Vhh>20):
+                print("Rho exploding. Aborting....")
+                training = False
+
+            # Is the new error lower than our best? Update the best
+            if error < best_score:
+                patience = 300
+                best_score = error
+                    
+            if (patience <= 0):
+                print("No improvement over 30'000 samples. Aborting...")
+                training = False
+                
+            # Print the results from the validation
+            print("Iter %07d" % n, ":",
+                  "cost %05.3f, " % avg_cost,
+                  "|Whh| %7.5f, " % avg_dWhh_norm,
+                  "r %01.3f," % rho_Whh,
+                  "|bh| %7.3f, " % avg_dbh_norm,
+                  "|Wxh| %7.3f, " % avg_dWxh_norm,
+                  "|Why| %7.3f, " % avg_dWhy_norm,
+                  "|by| %7.3f, " % avg_dhy_norm,
+                  "|g| %7.5f, " % avg_g_norm,
+                  "r %01.3f," % rho_Vhh,
+                  "err %07.3f%%, " % error,
+                  "best err %07.3f%%" % best_score)
+
+            # Is the error below 0.0001? If yes, the problem has been solved
+            if error < .0001 and np.isfinite(valid_cost):
+                training = False
+                print("PROBLEM SOLVED!")
+
+
+            # Reset the accumulators
+            avg_cost = 0
+            avg_dWhh_norm = 0
+            avg_dWxh_norm = 0
+            avg_dWhy_norm = 0
+            avg_dbh_norm = 0
+            avg_dhy_norm = 0
+            
+            avg_g_norm = 0
+
+        # Increase the iteration counter
+        n += 1    
+        
+    # Training completed. Print the final validation error.
+    print("******************************************************")
+    print("Training completed. Final best error : %07.3f%%" % best_score)
+    print("******************************************************")
+    print("------------------------------------------------------")
+
+    return (n-1),best_score
