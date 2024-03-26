@@ -621,3 +621,115 @@ def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, bat
     print("------------------------------------------------------")
 
     return (n-1),best_score
+
+def main(args): 
+
+    # Set a random seed for reproducibility
+    rng = np.random.RandomState(1234)
+
+    # Parse the command line arguments
+    parser = argparse.ArgumentParser(description="Runs a TPTT RNN test against the pathological\
+                                     tasks defined in Hochreiter, S. and Schmidhuber, J. \
+                                     (1997). Long short-term memory. Neural Computation, \
+                                     9(8), 1735–1780\nThis work is licensed under the \
+                                     Creative Commons Attribution 4.0 International License.")
+
+    parser.add_argument("--task", help="Pathological task", choices=["temporal", "temporal3", "addition", "perm"],
+                        required=True)
+
+    parser.add_argument("--maxiter",help="Maximum number of iterations", 
+                        default = 100000, required=False, type=int)
+    
+    parser.add_argument("--batchsize",help="Size of the minibatch", 
+                        default = 20, required=False, type=int)
+
+    parser.add_argument("--min",help="Minimal length of the task", 
+                        default = 10, required=False, type=int)
+
+    parser.add_argument("--max",help="Maximal length of the task", 
+                        default = 10, required=False, type=int)
+
+    parser.add_argument("--chk",help="Check interval", 
+                        default = 100, required=False, type=int)
+
+    parser.add_argument("--hidden",help="Number of units in the hidden layer", 
+                        default = 100, required=False, type=int)
+
+    parser.add_argument("--opt", help="Optimizer", choices=["vanilla", "nesterov"],
+                        default = "nesterov", required=False)
+
+    parser.add_argument("--init", help="Weight initialization and activation function", choices=["tanh-randorth", "sigmoid"],
+                        default = "tanh-randorth", required=False)
+
+    parser.add_argument("--ilr",help="Initial learning rate", default = 0.1, 
+                        required=False, type=float)
+
+    parser.add_argument("--flr",help="Forward learning rate", default = 0.01, 
+                        required=False, type=float)
+
+    parser.add_argument("--glr",help="Feedback learning rate", default = 0.001, 
+                        required=False, type=float)
+    
+    parser.add_argument("--wxh_updates", help="Update mechanism for Wxh", choices=["bptt", "tptt"],
+                        default = "tptt", required=False)
+
+    parser.add_argument("--noise", help="Injected Gaussian noise", 
+                        default = 0.0, required=False, type=float)
+
+    args = parser.parse_args()
+
+    # Maximal length of the task and minimal length of the task.
+    # If you want to run an experiment were sequences have fixed length, set
+    # these to hyper-parameters to the same value. Otherwise each batch will
+    # have a length randomly sampled from [min_length, max_length]
+    min_length = args.min
+    max_length = args.max
+    
+    noise = args.noise
+    
+    # Get the problem type and instantiate the respective generator
+    if args.task == "temporal":
+        task = TempOrderTask(rng, torch.float32)
+    if args.task == "temporal3":
+        task = TempOrder3bitTask(rng, torch.float32)
+    elif args.task == "addition":
+        task = AddTask(rng, torch.float32)
+    elif args.task == "perm":
+        task = PermTask(rng, torch.float32)
+    
+    # Set the maximum number of iterations
+    maxiter = args.maxiter
+    
+    # Update mechanism for Wxh
+    wxh_updates = args.wxh_updates
+
+    # Set the mini-batch size
+    batch_size = args.batchsize
+
+    # Set the number of iterations between each validation
+    chk_interval = args.chk
+
+    # Set the number of neurons in the hidden layer
+    n_hid = args.hidden
+
+    # Set the random weights initialisation and the optimisation techniuqe
+    init   = args.init
+    gd_opt = args.opt
+    
+    # Set the size and number of mini-batches for the validation phase
+    val_size  = 10000
+    val_batch = 1000
+    
+    # Set the learning rates and Gaussian noise decay iteration
+    i_learning_rate = args.ilr
+    f_learning_rate = args.flr
+    g_learning_rate = args.glr
+    
+    # Train the network
+    fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, \
+        batch_size, max_length, min_length, task, maxiter, chk_interval, noise, \
+        val_size, val_batch, gd_opt, args.task, wxh_updates)
+
+if __name__=='__main__':
+
+    main(sys.argv)
