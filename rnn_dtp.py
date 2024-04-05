@@ -95,29 +95,6 @@ def mse(x, y):
     """
     return torch.mean((x - y) ** 2)
 
-def rand_ortho(shape, irange, rng):
-    """
-    Generates an orthogonal matrix. Original code from
-
-    Lee, D. H. and Zhang, S. and Fischer, A. and Bengio, Y., Difference
-    Target Propagation, CoRR, abs/1412.7525, 2014
-
-    https://github.com/donghyunlee/dtp
-
-    Parameters
-    ----------
-    shape  : matrix shape
-    irange : range for the matrix elements
-    rng    : RandomState instance, initiated with a seed
-
-    Returns
-    -------
-    An orthogonal matrix of size *shape*
-    """
-    A = irange * (2 * torch.rand(shape) - 1)
-    U, _, V = torch.svd(A)
-    return torch.mm(U, torch.mm(torch.eye(U.shape[1], V.shape[0]), V))
-
 def sample_length(min_length, max_length, rng):
     """
     Computes a sequence length based on the minimal and maximal sequence size.
@@ -152,6 +129,29 @@ def gaussian(shape, std):
     Drawn samples from the parameterized normal distribution
     """
     return torch.randn(shape) * std
+
+def rand_ortho(shape, irange):
+    """
+    Generates an orthogonal matrix. Original code from
+
+    Lee, D. H. and Zhang, S. and Fischer, A. and Bengio, Y., Difference
+    Target Propagation, CoRR, abs/1412.7525, 2014
+
+    https://github.com/donghyunlee/dtp
+
+    Parameters
+    ----------
+    shape  : matrix shape
+    irange : range for the matrix elements
+    rng    : RandomState instance, initiated with a seed
+
+    Returns
+    -------
+    An orthogonal matrix of size *shape*
+    """
+    A = -irange + (2 * torch.rand(shape) - 1)
+    U, _, V = torch.svd(A)
+    return torch.mm(U, torch.mm(torch.eye(U.shape[1], V.shape[0]), V))
 
 def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, batch_size, max_length, min_length, task, maxiter, chk_interval, gaussian_noise, val_size, val_batch, gd_opt, task_name, wxh_updates):
     """
@@ -247,10 +247,12 @@ def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, bat
     # The initial state h0 is initialized with 0's
     h0 = torch.zeros(batch_size, n_hid)
 
-    # Define symbolic variables
-    x = torch.Tensor() # Assuming tensor3 is a 3D tensor in Theano
-    t = torch.Tensor() # Assuming matrix is a 2D tensor in Theano
-
+    # Define symbolic variables, inital state?
+    # 10, 20, 6
+    # seq, batch_size, 
+    x = torch.zeros(10, 20, 6)#torch.Tensor() # Assuming tensor3 is a 3D tensor in Theano 
+    t = torch.zeros(20, 4)#torch.Tensor() # Assuming matrix is a 2D tensor in Theano
+    #breakpoint()
     i_lr = torch.scalar_tensor(0.0) # assuming scalar is a scalar value in Theano
     f_lr = torch.scalar_tensor(0.0)
     g_lr = torch.scalar_tensor(0.0)
@@ -258,8 +260,10 @@ def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, bat
     noise = torch.scalar_tensor(0.0)
 
     # Define the forward function F(.)
-    F = lambda x, hs: activ(torch.mm(hs, Whh) + torch.mm(x, Wxh) + bh)
-
+    #F = lambda x, hs: activ(torch.mm(hs, Whh) + torch.mm(x, Wxh) + bh)
+    def F(x, hs):
+        breakpoint()
+        return activ(torch.mm(hs, Whh) + torch.mm(x, Wxh) + bh)
     # Compute the hidden activations (h_t) in forward pass
     h = [h0]
     def forward_function(x_t, h_prev, Whh, Wxh, Why, bh):
@@ -272,7 +276,7 @@ def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, bat
     if task.classifType == 'lastSoftmax':
         # Classification problem - set the last layer to softmax and use cross-entropy loss
         y = torch.nn.functional.softmax(torch.mm(h[-1], Why) + by, dim=1)
-        cost = -(t * torch.log(y)).mean(dim=0).sum()
+        return -(t * torch.log(y)).mean(dim=0).sum()
     elif task.classifType == 'lastLinear':
         # Real values output - final step is linear, and the loss is MSE
         y = torch.mm(h[-1], Why) + by
@@ -282,7 +286,7 @@ def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, bat
     G = lambda x, hs: activ(torch.mm(x, Wxh) + torch.mm(hs, Vhh) + ch)
 
     # First target is based on the derivative of the global error w.r.t. the parameters in the final layer
-    grad_cost = torch.autograd.grad(cost, h, retain_graph=True)[-1]
+    grad_cost = torch.autograd.grad(cost(t, y), h, retain_graph=True)[-1]
     first_target = h[-1] - i_lr * grad_cost
 
     # Set the local targets for the upstream layers    
@@ -416,8 +420,8 @@ def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, bat
     dbh_norm = torch.sqrt(torch.sum(dbh**2))
 
     # Define a forward step function
-    def f_step(x_t, i_lr, f_lr):
-        return cost, dWhh_norm, dWxh_norm, dWhy_norm, dby_norm, dbh_norm
+    def f_step(x, y, i_lr, f_lr):
+        return cost(x, y), dWhh_norm, dWxh_norm, dWhy_norm, dby_norm, dbh_norm
     
     # Define a feedback step function 
     def g_step(x, g_lr, noise):
@@ -509,7 +513,6 @@ def fit(rng, i_learning_rate, f_learning_rate, g_learning_rate, n_hid, init, bat
 
         # Update the accumulation variables
         avg_cost += tr_cost
-
         avg_dWhh_norm += f_Whh
         avg_dWxh_norm += f_Wxh
         avg_dWhy_norm += f_Why
