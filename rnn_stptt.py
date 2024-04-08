@@ -290,7 +290,7 @@ class SRNN(object):
         f_optimizer.zero_grad()
 
         out = torch.zeros(self.batch_size, self.n_out)
-        for i in range(self.M):
+        for _ in range(self.M):
             hs_tmax, h, out_ = self.forward(x, y)
             out = out + out_
         out = out / self.M
@@ -328,11 +328,16 @@ class SRNN(object):
                 print("Epoch -- \t Cost -- \t Test Acc: %.2f \t Highest: %.2f" % (acc, acc))
 
             cost = 0
-
+            train_x, train_y = task.generate(20, 
+                                         sample_length(10, 
+                                                       10, rng))
+            self.X = Variable(torch.from_numpy(train_x))
+            self.y = Variable(torch.from_numpy(train_y))
             # Inverse mappings
             for i in range(n_batches):
                 batch_start_idx = i * self.batch_size
                 batch_end_idx = batch_start_idx + self.batch_size
+
                 x = self.X[:, batch_start_idx:batch_end_idx, :]
                 y = self.y[batch_start_idx:batch_end_idx, :]
                 self._step_g(x, y, g_optimizer)
@@ -403,7 +408,7 @@ class SRNN(object):
             #print(f"Epoch: {epoch}")
             epoch += 1
 
-        return best.item(), cost.item()
+        return best, cost.item()
 
 def sample_length(min_length, max_length, rng):
     """
@@ -512,17 +517,17 @@ def main():
     hidden = 100
     maxiter = 100000
     i_learning_rate = 0.1
-    f_learning_rate = 0.01
-    g_learning_rate = 0.01
+    f_learning_rate = 0.1
+    g_learning_rate = 0.00001
     noise = 0.0
-    M = 20
+    M = 1
 
     seed = 1234
 
     init = nn.init.orthogonal_
 
     sto = False
-    hybrid = True # set to false for no stochasticity
+    hybrid = False#True # set to false for no stochasticity
 
     # Experiment 1 - shallow depth
     seq = 10
