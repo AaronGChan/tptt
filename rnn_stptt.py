@@ -20,6 +20,10 @@ from torch.nn.parameter import Parameter
 from torch.autograd import Variable
 from torch import optim
 from tempOrder import TempOrderTask
+from addition import AddTask
+from permutation import PermTask
+from tempOrder3bit import TempOrder3bitTask
+
 from collections import OrderedDict
 
 #from task_a import TaskAClass
@@ -189,14 +193,19 @@ class SRNN(object):
         self.Vhh.grad = dVhh.sum(0)
         self.ch.grad = dch.sum(0)
 
-
-    def _calc_f_grads(self, x, h, h_, cost):
+    def _calc_f_grads(self, x, h, h_, cost, out, target):
         dWhh = torch.zeros((self.seq_length, self.n_hid, self.n_hid), requires_grad=False)
         dWxh = torch.zeros((self.seq_length, self.n_inp, self.n_hid), requires_grad=False)
         dbh = torch.zeros((self.seq_length, self.n_hid), requires_grad=False)
 
         dWhy, dby = torch.autograd.grad(cost, (self.Why, self.by), retain_graph=True)
 
+        def dsoftmax(softmax):
+            return softmax * (1-softmax)
+        #breakpoint()
+        dloss_dwhy = np.dot(cost.detach(), (out.detach().numpy()-target.detach().numpy()))
+        grad_dwhy = np.dot(h[-1].detach().numpy().T, dloss_dwhy)
+        breakpoint()
         dWhh[0], dWxh[0], dbh[0] = torch.autograd.grad(self._mse(h[0], h_[0]),
                                                        (self.Whh, self.Wxh, self.bh), retain_graph=True)
         
@@ -305,7 +314,7 @@ class SRNN(object):
         with torch.no_grad():
             h_ = self._get_targets(x, hs_tmax, h, cost, ilr)
 
-        self._calc_f_grads(x, h, h_, cost)
+        self._calc_f_grads(x, h, h_, cost, out, y)
         
         #pre_dwhh = self.Whh
         f_optimizer.step()
@@ -328,9 +337,9 @@ class SRNN(object):
                 print("Epoch -- \t Cost -- \t Test Acc: %.2f \t Highest: %.2f" % (acc, acc))
 
             cost = 0
-            train_x, train_y = task.generate(20, 
-                                         sample_length(10, 
-                                                       10, rng))
+            train_x, train_y = task.generate(self.batch_size, 
+                                         sample_length(self.seq_length, 
+                                                       self.seq_length, rng))
             self.X = Variable(torch.from_numpy(train_x))
             self.y = Variable(torch.from_numpy(train_y))
             # Inverse mappings
@@ -436,7 +445,15 @@ def run_experiment(seed, init, task_name, opt, seq, hidden, stochastic, hybrid, 
     torch.manual_seed(seed)
     model_rng = np.random.RandomState(seed)
     rng = model_rng
-    task = TempOrderTask(rng, "float32")
+    if task_name == "temporal":
+        task = TempOrderTask(rng, "float32")        
+    if task_name == "temporal3":
+        task = TempOrder3bitTask(rng, "float32")        
+    elif task_name == "addition":
+        task = AddTask(rng, "float32")
+    elif task_name == "perm":
+        task = PermTask(rng, "float32")
+    #task = TempOrderTask(rng, "float32")
     val_batch = 1000
     X, y = task.generate(batch, sample_length(seq, seq, rng))
     X_test, y_test = task.generate(val_batch, sample_length(seq, seq, rng))
@@ -517,8 +534,8 @@ def main():
     hidden = 100
     maxiter = 100000
     i_learning_rate = 0.1
-    f_learning_rate = 0.1
-    g_learning_rate = 0.00001
+    f_learning_rate = 0.01
+    g_learning_rate = 0.001
     noise = 0.0
     M = 1
 
@@ -532,7 +549,7 @@ def main():
     # Experiment 1 - shallow depth
     seq = 10
 
-    run_experiment(seed, init, "task_A", "SGD", seq, hidden, sto, hybrid, batch, maxiter,
+    run_experiment(seed, init, "temporal", "SGD", seq, hidden, sto, hybrid, batch, maxiter,
                    i_learning_rate, f_learning_rate, g_learning_rate, noise, M, check_interval=100)
 
     # # Experiment 2 - deeper network
