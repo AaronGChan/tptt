@@ -424,9 +424,9 @@ def run_experiment(seed, init, task_name, opt, seq, hidden, stochastic, hybrid, 
     # X_test, y_test = task.generate(val_batch, sample_length(seq, seq, rng))
     last_layer = "softmax"
     task = "MNIST"
-    sample_train = 70
-    sample_test  = 30
-    X, y, X_test, y_test = load_MNIST("mnist_8x8", one_hot=True, 
+    sample_train = 10000
+    sample_test  = 1000
+    X, y, X_test, y_test = load_MNIST("/Users/aaronchan/Documents/ECEN_689_Neuro/tptt-rnns/mnist_8x8", one_hot=True, 
                                         norm=True, sample_train=sample_train, 
                                         sample_test=sample_test)
 
@@ -504,7 +504,7 @@ def run_experiment(seed, init, task_name, opt, seq, hidden, stochastic, hybrid, 
     
 
 
-def load_MNIST(data_folder, one_hot = False, norm = False, sample_train = 0, sample_test = 0):
+def load_MNIST(data_folder, one_hot = False, norm = True, sample_train = 0, sample_test = 0):
     """
     Loads, samples (if needed), and one-hot encodes the MNIST data set.
             
@@ -525,10 +525,10 @@ def load_MNIST(data_folder, one_hot = False, norm = False, sample_train = 0, sam
     y_test  - Test labels. Dimensions are (number of samples, 10)
     """
     X_train = np.genfromtxt("%s/train_X.csv" % data_folder, delimiter=',', dtype=np.float32)
-    y_train = np.asarray(np.fromfile("%s/train_y.csv" % data_folder, sep='\n'), dtype="int32")
+    y_train = np.asarray(np.fromfile("%s/train_Y.csv" % data_folder, sep='\n'), dtype="int32")
 
     X_test = np.genfromtxt("%s/test_X.csv" % data_folder, delimiter=',', dtype=np.float32)
-    y_test = np.asarray(np.fromfile("%s/test_y.csv" % data_folder, sep='\n'), dtype="int32")   
+    y_test = np.asarray(np.fromfile("%s/test_Y.csv" % data_folder, sep='\n'), dtype="int32")   
 
     if (sample_train != 0) and (sample_test != 0):
         
@@ -547,8 +547,8 @@ def load_MNIST(data_folder, one_hot = False, norm = False, sample_train = 0, sam
         
     if norm:
         print("MNIST NORMALISED!")
-        X_train /= 255
-        X_test  /= 255
+        X_train /= 255.0
+        X_test  /= 255.0
 
     # Swap axes
     X_train = np.swapaxes(np.expand_dims(X_train,axis=0),0,2)
@@ -585,7 +585,7 @@ def main():
     rng = np.random.RandomState(1234)
 
     run_experiment(seed, init, "task_A", "SGD", seq, hidden, sto, hybrid, batch, maxiter,
-                  i_learning_rate, f_learning_rate, g_learning_rate, noise, M, check_interval=100)
+                  i_learning_rate, f_learning_rate, g_learning_rate, noise, M, check_interval=1)
 
     # # Experiment 2 - deeper network
     # seq = 30

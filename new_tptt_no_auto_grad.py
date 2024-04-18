@@ -186,10 +186,12 @@ class SRNN(object):
     def _get_targets(self, x, hs_tmax, h, cost, ilr, error):
         h_ = torch.zeros(self.seq_length, self.batch_size, self.n_hid)
         #grad_h2 = 2 * error
-        def tanh_derivative(x):
-            return 1 - np.tanh(x)**2
-        v = tanh_derivative(hs_tmax.detach().numpy() @ self.Why.detach().numpy() + self.by.detach().numpy())
-        z = np.dot(v, (self.Why.detach().numpy()).T)/h.shape[1]
+        # def tanh_derivative(x):
+        #     return 1 - np.tanh(x)**2
+        # v = tanh_derivative(hs_tmax.detach().numpy() @ self.Why.detach().numpy() + self.by.detach().numpy())
+        # dE/dhs_tmax = dE/dy * dy/dhs_tmax
+        # (error) * Why
+        z = np.dot(error, (self.Why.detach().numpy()).T)/h.shape[1]
         h_[-1, :, :] = hs_tmax - ilr * torch.from_numpy(z)#error#torch.autograd.grad(cost, hs_tmax, retain_graph=True)[0]
         h_[-1, :, :] = h[-1, :, :] - hs_tmax + h_[-1, :, :]
 
@@ -236,7 +238,7 @@ class SRNN(object):
             dVhh[t], dch[t] = torch.autograd.grad(self._mse(self._g(x[t, :, :], h[t]), h[t - 1].detach()),
                                                   (self.Vhh, self.ch), retain_graph=True)
             grad_dVhh[t], grad_dch[t] = targets_grads(h[t], x[t, :, :].detach().numpy())
-
+        breakpoint()
         self.Vhh.grad = torch.from_numpy(np.sum(grad_dVhh, 0))#dVhh.sum(0)
         self.ch.grad = torch.from_numpy(np.sum(grad_dch, 0))#dch.sum(0)
         # self.Vhh.grad = dVhh.sum(0)
