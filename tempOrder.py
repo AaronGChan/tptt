@@ -15,7 +15,7 @@ Author: Hitesh Vaidya
 
 import numpy as np
 
-class TempoOrderTask(object):
+class TempOrderTask(object):
     def __init__(self, rng, floatX) -> None:
         """
         constructor
