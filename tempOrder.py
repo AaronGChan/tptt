@@ -41,6 +41,7 @@ class TempOrderTask(object):
         vals = self.rng.randint(4, size=(l, batchsize)) + 2
         vals[p0, np.arange(batchsize)] = v0
         vals[p1, np.arange(batchsize)] = v1
+        #breakpoint()
         data = np.zeros((l, batchsize, 6), dtype=self.floatX)
         targ = np.zeros((batchsize, 4), dtype=self.floatX)
         data.reshape((l*batchsize, 6))[np.arange(l*batchsize), 
@@ -50,7 +51,7 @@ class TempOrderTask(object):
     
 if __name__ == "__main__":
     print('Testing temp order task generator ..')
-    task = TempoOrderTask(np.random.RandomState(42), 'float32')
+    task = TempOrderTask(np.random.RandomState(1234), 'float32')
     seq, targ = task.generate(3, 25)
     assert seq.dtype == 'float32'
     assert targ.dtype == 'float32'
