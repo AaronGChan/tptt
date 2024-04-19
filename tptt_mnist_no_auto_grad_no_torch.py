@@ -666,9 +666,9 @@ def main():
     batch = 16
     hidden = 100
     maxiter = 50
-    i_learning_rate = 0.000001
+    i_learning_rate = 0.0000001
     f_learning_rate = 0.01
-    g_learning_rate = 0.0000001
+    g_learning_rate = 0.00000001
     noise = 0.0
     M = 1
 
