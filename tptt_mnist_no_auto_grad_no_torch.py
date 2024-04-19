@@ -373,7 +373,7 @@ class SRNN(object):
         # f_optimizer.step()
         return cost
 
-    def fit(self, ilr, maxiter, g_optimizer, f_optimizer, task, rng, check_interval=1):
+    def fit(self, ilr, maxiter, g_optimizer, f_optimizer, task, rng, glr, flr, check_interval=1):
 
         training = True
         epoch = 1
@@ -471,7 +471,7 @@ class SRNN(object):
 
         date = datetime.now()
         with open(
-            f"accuracy_data_{date}_no_auto_grad_no_torch_{maxiter}.pkl", "wb"
+            f"accuracy_data_{date}_no_auto_grad_no_torch_{maxiter}_{ilr}_{glr}_{flr}.pkl", "wb"
         ) as f:
             pickle.dump(accs, f)
         return best, cost.item()
@@ -582,7 +582,8 @@ def run_experiment(
     g_optimizer = None
     f_optimizer = None
     val_acc, tr_cost = model.fit(
-        i_learning_rate, maxiter, g_optimizer, f_optimizer, task, rng, check_interval
+        i_learning_rate, maxiter, g_optimizer, f_optimizer, task, rng, g_learning_rate,
+        f_learning_rate, check_interval
     )
     # file_name = "rnn_stptt_" + "t" + str(seq) + "_taskA_i" \
     #             + str(i_learning_rate) + "_f" + str(f_learning_rate) + "_g" \
@@ -664,10 +665,10 @@ def load_MNIST(data_folder, one_hot=False, norm=True, sample_train=0, sample_tes
 def main():
     batch = 16
     hidden = 100
-    maxiter = 35
-    i_learning_rate = 0.0000001
+    maxiter = 50
+    i_learning_rate = 0.000001
     f_learning_rate = 0.01
-    g_learning_rate = 0.00000001
+    g_learning_rate = 0.0000001
     noise = 0.0
     M = 1
 
@@ -680,8 +681,8 @@ def main():
 
     # Experiment 1 - shallow depth
     seq = 64
-    rng = np.random.RandomState(1234)
-
+    #rng = np.random.RandomState(1234)
+    np.random.seed(seed)
     run_experiment(
         seed,
         init,
