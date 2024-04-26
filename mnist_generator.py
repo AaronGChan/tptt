@@ -5,14 +5,26 @@ import numpy as np
 import scipy.io
 mnist = load_digits()
 
-data_set = scipy.io.loadmat('MNIST_TrainSet_0to1_8x8pixel.mat')     #MNIST dataset in 8x8 resolution
-data = data_set['number']
-label_set = scipy.io.loadmat('MNIST_TrainSet_Label.mat')
-label = label_set['label']
-data = data.T
-label = label.T
-x1 = pd.DataFrame(data)
-y1 = pd.DataFrame(label)
+# data_set = scipy.io.loadmat('MNIST_TrainSet_0to1_8x8pixel.mat')     #MNIST dataset in 8x8 resolution
+# data = data_set['number']
+# label_set = scipy.io.loadmat('MNIST_TrainSet_Label.mat')
+# label = label_set['label']
+# data = data.T
+# label = label.T
+
+loaded_data = np.load('MNIST8_group.npy', allow_pickle=True).item()
+train_data = loaded_data['train_X']
+train_labels = loaded_data['train_y']
+test_data = loaded_data['test_X']
+test_labels = loaded_data['test_y']
+x_train = pd.DataFrame(train_data)
+y_train = pd.DataFrame(train_labels)
+x_test = pd.DataFrame(test_data)
+y_test = pd.DataFrame(test_labels)
+#breakpoint()
+#breakpoint()
+# x1 = pd.DataFrame(data)
+# y1 = pd.DataFrame(label)
 
 # x = pd.DataFrame(mnist.data)
 # y = pd.DataFrame(mnist.target)
@@ -26,7 +38,7 @@ y1 = pd.DataFrame(label)
 #x = x / 255.0
 
 train_size = 0.7
-x_train, x_test, y_train, y_test = train_test_split(x1, y1, train_size=train_size)
+#x_train, x_test, y_train, y_test = train_test_split(x1, y1, train_size=train_size)
 # breakpoint()
 #breakpoint()
 x_train.to_csv("mnist_8x8/train_X.csv", header=False, index=False)

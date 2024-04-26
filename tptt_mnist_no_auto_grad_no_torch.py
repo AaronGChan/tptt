@@ -28,13 +28,10 @@ class SRNN(object):
         y_test,
         seq_length,
         n_hid,
-        init,
-        stochastic,
         hybrid,
         last_layer,
         noise,
         batch_size,
-        M,
         rng,
         g_learning_rate,
         f_learning_rate,
@@ -44,7 +41,6 @@ class SRNN(object):
 
         self.n_inp = X.shape[2]  # [seq size n_inp]
         self.n_out = y.shape[1]  # [size n_out]
-        self.M = M
 
         self.X = X
         self.y = y
@@ -53,7 +49,6 @@ class SRNN(object):
 
         self.seq_length = seq_length
         self.n_hid = n_hid
-        self.stochastic = stochastic
         self.hybrid = hybrid
         self.noise = noise
         self.last_layer = last_layer
@@ -125,8 +120,6 @@ class SRNN(object):
         return x
 
     def _f(self, x, hs):
-        if self.stochastic:
-            hs = self._sample(hs)
         z = self.activ(hs @ self.Whh + x @ self.Wxh + self.bh)
         return z
 
@@ -178,11 +171,6 @@ class SRNN(object):
             hp_with_noise_in_h = self._f(x, h + noise)
             h_cap_with_noise = self._g(x, hp_with_noise_in_h)
             h_cap_error = h_cap_with_noise - (h + noise)  # predictions - truth
-
-            def relu_derivative(x):
-                # return (x>0)*1-(x<=0)*0.01
-                return (x > 0) * 1
-                pass
 
             def tanh_derivative(x):
                 return 1 - np.tanh(x) ** 2
@@ -253,7 +241,7 @@ class SRNN(object):
             grad_dbh[t] = grad_dbh[t].flatten()
             grad_dWxh[t], _ = forward_grads(h[t], h_[t], x[t - 1])
 
-        # return dWhh, dWxh, dbh, dwhy, dby
+        # returns dWhh, dWxh, dbh, dwhy, dby
         return (
             np.sum(grad_dWhh, axis=0),
             np.sum(grad_dWxh, axis=0),
@@ -264,11 +252,7 @@ class SRNN(object):
 
     def forward(self, x, y):
         h = self._hidden(x)
-        # new work implementation:
-        # hs_tmax = self._sample(h[-1]).clone().detach().requires_grad_(True)
-        # the above is what the code used for this work, not the OG DTP work we are replicating
-        # hs_tmax = h[-1].clone().detach().requires_grad_(True) # in the context of the OG DTP work, hst_max = ht
-        hs_tmax = h[-1].copy()  # .clone().detach().requires_grad_(True)
+        hs_tmax = h[-1].copy()
         out = hs_tmax @ self.Why + self.by
         if self.last_layer == "softmax":
             out = self.sftmx(out)
@@ -296,21 +280,28 @@ class SRNN(object):
 
         return out
 
-    def run_validation(self, x, y, avg_probs_100=True):
+    def run_validation(self, x, y):
 
         valid_cost = 0
         valid_err = 0
 
-        if self.stochastic and avg_probs_100:
-            out = np.stack([self._validate(x) for i in range(100)]).mean(axis=0)
-        else:
-            out = self._validate(x)
+        out = self._validate(x)
 
         if self.last_layer == "softmax":
             valid_cost = self._cross_entropy(out, y)
             y = np.argmax(y, axis=1)
             y_hat = np.argmax(out, axis=1)
             valid_err = np.mean(y_hat != y)
+            # code to save image
+            # import matplotlib.pyplot as plt
+            # for i in range(10):
+            #     img_array = x[:, i, :].reshape(8, 8)*255.0
+            #     img_array = img_array.astype(np.uint8)
+            #     plt.imshow(img_array, interpolation='nearest')
+            #     plt.savefig(f"plots/test_mnist_image_{i}.png")
+            #     print(out[i])
+            #     print("ypred", y_hat[i])
+            #     print("y_true", y[i])
         elif self.last_layer == "linear":
             valid_cost = self._mse(out, y).sum()
             valid_err = np.mean(np.sum((y - out) ** 2, axis=1) > 0.04)
@@ -322,9 +313,7 @@ class SRNN(object):
 
         return valid_cost, valid_err
 
-    def _step_g(self, x, y, g_optimizer):
-        # g_optimizer.zero_grad()
-
+    def _step_g(self, x, y):
         h = self._hidden(x)
 
         # Corrupt targets with noise
@@ -336,16 +325,11 @@ class SRNN(object):
         self.Vhh = self.Vhh - Vhh_grad * self.g_lr
         self.ch = self.ch - ch_grad * self.g_lr
 
-        # g_optimizer.step()
-
-    def _step_f(self, ilr, x, y, f_optimizer):
-        # f_optimizer.zero_grad()
+    def _step_f(self, ilr, x, y):
 
         out = np.zeros((self.batch_size, self.n_out), np.float32)
-        for i in range(self.M):
-            hs_tmax, h, out_ = self.forward(x, y)
-            out = out + out_
-        out = out / self.M
+        hs_tmax, h, out_ = self.forward(x, y)
+        out = out + out_
 
         if self.last_layer == "softmax":
             cost = self._cross_entropy(out, y)
@@ -364,16 +348,18 @@ class SRNN(object):
         self.grad_bh = dbh
         self.grad_by = dby
         self.grad_Why = dwhy
+        def mem_gaussian(x, _mem_noise):
+            # function for adding memristor noise
+            return np.random.normal(0, _mem_noise*np.max(x), np.shape(x))
         self.Whh = self.Whh - self.f_lr * dWhh
         self.Wxh = self.Wxh - self.f_lr * dWxh
         self.bh = self.bh - self.f_lr * dbh
         self.Why = self.Why - self.f_lr * dwhy
         self.by = self.by - self.f_lr * dby
         # pre_dwhh = self.Whh
-        # f_optimizer.step()
         return cost
 
-    def fit(self, ilr, maxiter, g_optimizer, f_optimizer, task, rng, glr, flr, check_interval=1):
+    def fit(self, ilr, maxiter, task, rng, glr, flr, check_interval=1):
 
         training = True
         epoch = 1
@@ -399,7 +385,7 @@ class SRNN(object):
                 batch_end_idx = batch_start_idx + self.batch_size
                 x = self.X[:, batch_start_idx:batch_end_idx, :]
                 y = self.y[batch_start_idx:batch_end_idx, :]
-                self._step_g(x, y, g_optimizer)
+                self._step_g(x, y)
 
             # Forward mappings
             for i in range(n_batches):
@@ -408,7 +394,7 @@ class SRNN(object):
                 x = self.X[:, batch_start_idx:batch_end_idx, :]
                 y = self.y[batch_start_idx:batch_end_idx, :]
 
-                cost += self._step_f(ilr, x, y, f_optimizer)
+                cost += self._step_f(ilr, x, y)
                 if np.isnan(cost):
                     print("Cost is NaN. Aborting....")
                     training = False
@@ -503,7 +489,6 @@ def run_experiment(
     init,
     task_name,
     opt,
-    seq,
     hidden,
     stochastic,
     hybrid,
@@ -523,8 +508,8 @@ def run_experiment(
 
     last_layer = "softmax"
     task = "MNIST"
-    sample_train = 10000
-    sample_test = 1000
+    sample_train = 60000
+    sample_test = 10000
     X, y, X_test, y_test = load_MNIST(
         "mnist_8x8",
         one_hot=True,
@@ -532,7 +517,7 @@ def run_experiment(
         sample_train=sample_train,
         sample_test=sample_test,
     )
-
+    seq = X.shape[0]
     model = SRNN(
         X,
         y,
@@ -540,13 +525,10 @@ def run_experiment(
         y_test,
         seq,
         hidden,
-        init,
-        stochastic,
         hybrid,
         last_layer,
         noise,
         batch,
-        M,
         model_rng,
         g_learning_rate,
         f_learning_rate,
@@ -579,17 +561,10 @@ def run_experiment(
         print("noise     : ---")
     print("--------------------")
 
-    g_optimizer = None
-    f_optimizer = None
     val_acc, tr_cost = model.fit(
-        i_learning_rate, maxiter, g_optimizer, f_optimizer, task, rng, g_learning_rate,
+        i_learning_rate, maxiter, task, rng, g_learning_rate,
         f_learning_rate, check_interval
     )
-    # file_name = "rnn_stptt_" + "t" + str(seq) + "_taskA_i" \
-    #             + str(i_learning_rate) + "_f" + str(f_learning_rate) + "_g" \
-    #             + str(g_learning_rate) + "_" + init.__name__  + opt.lower()
-
-    # model.plot_classA(file_name + ".png")
 
     return val_acc, tr_cost
 
@@ -627,7 +602,6 @@ def load_MNIST(data_folder, one_hot=False, norm=True, sample_train=0, sample_tes
     y_test = np.asarray(
         np.fromfile("%s/test_Y.csv" % data_folder, sep="\n"), dtype="int32"
     )
-
     if (sample_train != 0) and (sample_test != 0):
 
         print("Elements in train : %i" % sample_train)
@@ -665,9 +639,9 @@ def load_MNIST(data_folder, one_hot=False, norm=True, sample_train=0, sample_tes
 def main():
     batch = 16
     hidden = 100
-    maxiter = 50
+    maxiter = 100
     i_learning_rate = 0.0000001
-    f_learning_rate = 0.01
+    f_learning_rate = 0.025
     g_learning_rate = 0.00000001
     noise = 0.0
     M = 1
@@ -680,7 +654,7 @@ def main():
     hybrid = True  # set to false for no stochasticity
 
     # Experiment 1 - shallow depth
-    seq = 64
+    #seq = 784#64
     #rng = np.random.RandomState(1234)
     np.random.seed(seed)
     run_experiment(
@@ -688,7 +662,6 @@ def main():
         init,
         "task_A",
         "SGD",
-        seq,
         hidden,
         sto,
         hybrid,
