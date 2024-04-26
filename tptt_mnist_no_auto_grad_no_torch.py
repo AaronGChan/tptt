@@ -28,7 +28,6 @@ class SRNN(object):
         y_test,
         seq_length,
         n_hid,
-        hybrid,
         last_layer,
         noise,
         batch_size,
@@ -49,7 +48,6 @@ class SRNN(object):
 
         self.seq_length = seq_length
         self.n_hid = n_hid
-        self.hybrid = hybrid
         self.noise = noise
         self.last_layer = last_layer
         self.batch_size = batch_size
@@ -339,7 +337,6 @@ class SRNN(object):
             raise Exception("Unsupported classification type.")
 
         error = out - y
-        # with torch.no_grad():
         h_ = self._get_targets(x, hs_tmax, h, cost, ilr, error)
 
         dWhh, dWxh, dbh, dwhy, dby = self._calc_f_grads(x, h, h_, cost, out, y)
@@ -356,7 +353,6 @@ class SRNN(object):
         self.bh = self.bh - self.f_lr * dbh
         self.Why = self.Why - self.f_lr * dwhy
         self.by = self.by - self.f_lr * dby
-        # pre_dwhh = self.Whh
         return cost
 
     def fit(self, ilr, maxiter, task, rng, glr, flr, check_interval=1):
@@ -370,7 +366,6 @@ class SRNN(object):
         while training & (epoch <= maxiter):
 
             if epoch == 1:
-                # with torch.no_grad():
                 _, best = self.run_validation(self.X_test, self.y_test)
                 acc = 100 * (1 - best)
                 print(
@@ -402,7 +397,6 @@ class SRNN(object):
 
             cost = cost / n_batches
             if epoch % check_interval == 0:
-                # with torch.no_grad():
                 valid_cost, valid_err = self.run_validation(self.X_test, self.y_test)
 
                 print_str = "It: {:10s}\tLoss: %.3f\t".format(str(epoch)) % cost
@@ -449,9 +443,7 @@ class SRNN(object):
                 if valid_err < 0.0001:
                     print("PROBLEM SOLVED.")
                     training = False
-            # print(f"Epoch: {epoch}")
             epoch += 1
-        # breakpoint()
         import pickle
         from datetime import datetime
 
@@ -486,23 +478,18 @@ def sample_length(min_length, max_length, rng):
 
 def run_experiment(
     seed,
-    init,
     task_name,
     opt,
     hidden,
-    stochastic,
-    hybrid,
     batch,
     maxiter,
     i_learning_rate,
     f_learning_rate,
     g_learning_rate,
     noise,
-    M,
     check_interval=10,
 ):
 
-    # torch.manual_seed(seed)
     model_rng = np.random.RandomState(seed)
     rng = model_rng
 
@@ -525,7 +512,6 @@ def run_experiment(
         y_test,
         seq,
         hidden,
-        hybrid,
         last_layer,
         noise,
         batch,
@@ -537,10 +523,6 @@ def run_experiment(
 
     print("SRNN TPTT Network")
     print("--------------------")
-    print("stochastic : %s" % stochastic)
-    if stochastic:
-        print("MCMC       : %i" % M)
-        print("Hybrid     : %s" % hybrid)
     print("task name  : %s" % task_name)
     print("train size : %i" % (X.shape[1]))
     print("test size  : %i" % (X_test.shape[1]))
@@ -628,7 +610,6 @@ def load_MNIST(data_folder, one_hot=False, norm=True, sample_train=0, sample_tes
     X_test = np.swapaxes(np.expand_dims(X_test, axis=0), 0, 2)
 
     # Encode the target labels
-    # breakpoint()
     if one_hot:
         onehot_encoder = OneHotEncoder(sparse_output=False, categories="auto")
         y_train = onehot_encoder.fit_transform(y_train.reshape(-1, 1))
@@ -644,42 +625,23 @@ def main():
     f_learning_rate = 0.025
     g_learning_rate = 0.00000001
     noise = 0.0
-    M = 1
 
     seed = 1234
 
-    # init = nn.init.orthogonal_
-    init = None
-    sto = False
-    hybrid = True  # set to false for no stochasticity
-
-    # Experiment 1 - shallow depth
-    #seq = 784#64
-    #rng = np.random.RandomState(1234)
     np.random.seed(seed)
     run_experiment(
         seed,
-        init,
         "task_A",
         "SGD",
         hidden,
-        sto,
-        hybrid,
         batch,
         maxiter,
         i_learning_rate,
         f_learning_rate,
         g_learning_rate,
         noise,
-        M,
         check_interval=1,
     )
-
-    # # Experiment 2 - deeper network
-    # seq = 30
-
-    # run_experiment(seed, init, "task_A", "Adagrad", seq, hidden, sto, hybrid, batch, maxiter,
-    #                i_learning_rate, f_learning_rate, g_learning_rate, noise, M, check_interval=100)
 
 
 if __name__ == "__main__":
